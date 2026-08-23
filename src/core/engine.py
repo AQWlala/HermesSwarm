@@ -61,6 +61,15 @@ class FusionEngine:
         # 初始化技能注册中心（融合Hermes SKILL.md + JiuwenSwarm 单库+可见性）
         from src.skills.registry import SkillRegistry
         self._skill_registry = SkillRegistry(self.config)
+        import os
+        skills_dir = os.environ.get("HERMESSWARM_SKILLS_DIR", "")
+        if skills_dir and os.path.isdir(skills_dir):
+            self._skill_registry.discover(skills_dir)
+        else:
+            from pathlib import Path
+            default_skills = Path(__file__).parent.parent.parent / "skills"
+            if default_skills.exists():
+                self._skill_registry.discover(default_skills)
 
         # 初始化工作流引擎（JiuwenSwarm基因: SwarmFlow + WorkflowRunState）
         from src.workflow.engine import WorkflowEngine
