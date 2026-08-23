@@ -22,7 +22,8 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "resources": []
+      "resources": [],
+      "externalBin": ["bin/hermesswarm-backend"]
     },
     "windows": [
       {
@@ -37,6 +38,12 @@
     ],
     "security": {
       "csp": null
+    },
+    "allowlist": {
+      "shell": {
+        "sidecar": true,
+        "execute": true
+      }
     }
   }
 }
