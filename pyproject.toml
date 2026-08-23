@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermesswarm"
+version = "0.1.0"
+description = "HermesSwarm - 基因级融合的可视化智能体编排平台"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "HermesSwarm Contributors"},
+]
+keywords = ["ai-agent", "workflow", "visualization", "hermes", "jiuwenswarm", "fusion"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "sqlite-utils>=3.36",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "click>=8.1",
+    "uvicorn>=0.29",
+    "fastapi>=0.111",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+ai = [
+    "openai>=1.30",
+    "anthropic>=0.25",
+    "litellm>=1.35",
+]
+
+[project.scripts]
+hermesswarm = "src.core.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
