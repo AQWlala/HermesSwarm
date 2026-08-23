@@ -1,59 +1,115 @@
 import React, { useState } from "react";
 import FusionCanvas from "./components/canvas/FusionCanvas";
+import WorkflowTemplates, { type TemplateData } from "./components/canvas/WorkflowTemplates";
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"canvas" | "skills" | "memory" | "config">("canvas");
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateData | null>(null);
+  const [execResult, setExecResult] = useState<Record<string, unknown> | null>(null);
+  const [, setExecStatus] = useState<string>("idle");
+
+  const renderResult = () => {
+    if (!execResult) return null;
+    const outputs = (execResult as any).outputs || {};
+    const status = (execResult as any).status || "unknown";
+    const layers = (execResult as any).layers || [];
+
+    return (
+      <div style={{ padding: 16, overflowY: "auto", height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <span style={{
+            padding: "4px 12px", borderRadius: 12, fontSize: 12, fontWeight: 600,
+            background: status === "completed" ? "#e6f9f0" : status === "failed" ? "#fde8e8" : "#f5f5f5",
+            color: status === "completed" ? "#008855" : status === "failed" ? "#cc0000" : "#666",
+          }}>
+            {status === "completed" ? "✓ 完成" : status === "failed" ? "✗ 失败" : status}
+          </span>
+          {layers.length > 0 && <span style={{ fontSize: 12, color: "#888" }}>{layers.length}层拓扑</span>}
+        </div>
+
+        {layers.length > 0 && (
+          <div style={{ marginBottom: 16, padding: "8px 12px", background: "#f8f9fa", borderRadius: 6, fontSize: 11, color: "#666" }}>
+            {layers.map((layer: string[], i: number) => (
+              <div key={i}>Layer {i}: [{layer.join(", ")}]</div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {Object.entries(outputs).map(([nodeId, output]) => {
+            const isObj = typeof output === "object" && output !== null;
+            const isError = isObj && "error" in (output as object);
+            const agentName = isObj ? (output as any).agent : null;
+            const outputText = isObj ? (output as any).output : output;
+            const skills = isObj ? (output as any).skills_used : null;
+
+            return (
+              <div key={nodeId} style={{
+                border: `1px solid ${isError ? "#cc0000" : "#e0e0e0"}`,
+                borderRadius: 8, overflow: "hidden",
+              }}>
+                <div style={{
+                  padding: "8px 12px", background: isError ? "#fde8e8" : "#f8f9fa",
+                  display: "flex", alignItems: "center", gap: 8,
+                  borderBottom: `1px solid ${isError ? "#cc0000" : "#e0e0e0"}`,
+                }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{nodeId}</span>
+                  {agentName && <span style={{ fontSize: 12, color: "#666" }}>· {agentName}</span>}
+                  {skills && skills.length > 0 && <span style={{ fontSize: 11, color: "#888" }}>· 技能: {skills.join(", ")}</span>}
+                  {isError && <span style={{ fontSize: 12, color: "#cc0000", marginLeft: "auto" }}>错误</span>}
+                </div>
+                <div style={{ padding: 12, fontSize: 13, lineHeight: 1.6, color: "#333", maxHeight: 300, overflowY: "auto" }}>
+                  {isError ? (
+                    <span style={{ color: "#cc0000" }}>{String((output as any).error)}</span>
+                  ) : outputText ? (
+                    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 13 }}>{String(outputText)}</pre>
+                  ) : (
+                    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 11, color: "#888" }}>
+                      {JSON.stringify(output, null, 2).slice(0, 2000)}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="app-layout">
       <div className="sidebar">
         <h1>☤ HermesSwarm</h1>
-        <button className={activeTab === "canvas" ? "active" : ""} onClick={() => setActiveTab("canvas")}>
-          🎨 可视化画布
-        </button>
-        <button className={activeTab === "skills" ? "active" : ""} onClick={() => setActiveTab("skills")}>
-          📚 技能管理
-        </button>
-        <button className={activeTab === "memory" ? "active" : ""} onClick={() => setActiveTab("memory")}>
-          🧠 记忆系统
-        </button>
-        <button className={activeTab === "config" ? "active" : ""} onClick={() => setActiveTab("config")}>
-          ⚙️ 配置
-        </button>
+        <div style={{ marginBottom: 16 }}>
+          <WorkflowTemplates onSelect={setSelectedTemplate} activeId={selectedTemplate?.id || null} />
+        </div>
         <div style={{ marginTop: "auto", fontSize: 11, color: "#666" }}>
-          v0.1.0 · 基因级融合
+          v0.3.0 · DeepSeek LLM
         </div>
       </div>
       <div className="main-content">
-        {activeTab === "canvas" && (
-          <>
-            <div className="toolbar">
-              <span style={{ fontSize: 14, fontWeight: "bold" }}>工作流编排</span>
-              <span style={{ fontSize: 12, color: "#666" }}>拖拽节点构建工作流 → 点击执行</span>
+        <div className="toolbar">
+          <span style={{ fontSize: 14, fontWeight: "bold" }}>
+            {selectedTemplate ? `${selectedTemplate.icon} ${selectedTemplate.name}` : "🎨 可视化画布"}
+          </span>
+          <span style={{ fontSize: 12, color: "#666" }}>
+            {selectedTemplate ? selectedTemplate.description : "选择左侧模板或拖拽节点构建工作流"}
+          </span>
+        </div>
+        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+          <div className="canvas-container" style={{ flex: 1 }}>
+            <FusionCanvas template={selectedTemplate} onResult={setExecResult} onStatus={setExecStatus} />
+          </div>
+          {execResult && (
+            <div style={{ width: 400, borderLeft: "1px solid #ddd", background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid #ddd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, fontSize: 15 }}>执行结果</h3>
+                <button onClick={() => setExecResult(null)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#999" }}>×</button>
+              </div>
+              {renderResult()}
             </div>
-            <div className="canvas-container">
-              <FusionCanvas />
-            </div>
-          </>
-        )}
-        {activeTab === "skills" && (
-          <div style={{ padding: 24 }}>
-            <h2>技能管理</h2>
-            <p style={{ color: "#666", marginTop: 8 }}>融合 Hermes SKILL.md + JiuwenSwarm 单库可见性</p>
-          </div>
-        )}
-        {activeTab === "memory" && (
-          <div style={{ padding: 24 }}>
-            <h2>记忆系统</h2>
-            <p style={{ color: "#666", marginTop: 8 }}>融合 Hermes FTS5 + JiuwenSwarm 向量索引</p>
-          </div>
-        )}
-        {activeTab === "config" && (
-          <div style={{ padding: 24 }}>
-            <h2>配置</h2>
-            <p style={{ color: "#666", marginTop: 8 }}>Hermes基因 + JiuwenSwarm基因 开关配置</p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
