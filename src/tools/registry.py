@@ -106,6 +106,27 @@ class ToolRegistry:
             handler=self._tool_terminal,
             severity="HIGH",
         )
+        self.register(
+            name="list_dir",
+            toolset="file",
+            schema={"description": "列出目录内容", "parameters": {"path": {"type": "string"}}},
+            handler=self._tool_list_dir,
+            severity="LOW",
+        )
+        self.register(
+            name="http_get",
+            toolset="web",
+            schema={"description": "HTTP GET请求", "parameters": {"url": {"type": "string"}}},
+            handler=self._tool_http_get,
+            severity="LOW",
+        )
+        self.register(
+            name="python_exec",
+            toolset="code",
+            schema={"description": "执行Python代码", "parameters": {"code": {"type": "string"}}},
+            handler=self._tool_python_exec,
+            severity="HIGH",
+        )
 
     async def _tool_read_file(self, path: str, **kwargs) -> str:
         try:
@@ -123,10 +144,70 @@ class ToolRegistry:
             return f"Error: {e}"
 
     async def _tool_web_search(self, query: str, **kwargs) -> str:
-        return f"Search results for: {query}"
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    "https://api.duckduckgo.com",
+                    params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+                )
+                data = resp.json()
+                results = []
+                if data.get("AbstractText"):
+                    results.append(f"{data['Heading']}: {data['AbstractText']}")
+                for topic in (data.get("RelatedTopics") or [])[:5]:
+                    if isinstance(topic, dict) and topic.get("Text"):
+                        results.append(topic["Text"])
+                return "\n".join(results) if results else f"No results for: {query}"
+        except Exception as e:
+            return f"Search error: {e}"
 
     async def _tool_terminal(self, command: str, **kwargs) -> str:
-        return f"Executed: {command}"
+        try:
+            import subprocess
+            result = subprocess.run(
+                command, shell=True, capture_output=True, text=True, timeout=30
+            )
+            output = result.stdout
+            if result.stderr:
+                output += f"\n[stderr]: {result.stderr}"
+            return output.strip() or "(no output)"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_list_dir(self, path: str = ".", **kwargs) -> str:
+        try:
+            from pathlib import Path
+            p = Path(path)
+            if not p.exists():
+                return f"Path not found: {path}"
+            items = []
+            for item in sorted(p.iterdir()):
+                prefix = "📁" if item.is_dir() else "📄"
+                items.append(f"{prefix} {item.name}")
+            return "\n".join(items) if items else "(empty)"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_http_get(self, url: str, **kwargs) -> str:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(url)
+                return f"Status: {resp.status_code}\n{resp.text[:5000]}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_python_exec(self, code: str, **kwargs) -> str:
+        try:
+            import io
+            import contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                exec(code, {"__builtins__": __builtins__})
+            return buf.getvalue().strip() or "(no output)"
+        except Exception as e:
+            return f"Error: {e}"
 
     async def execute(self, name: str, input_data: Any, parameters: dict[str, Any] | None = None) -> Any:
         """执行工具"""

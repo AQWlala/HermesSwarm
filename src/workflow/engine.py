@@ -87,6 +87,7 @@ class WorkflowEngine:
         self.workflows: dict[str, Workflow] = {}
         self.run_states: dict[str, WorkflowRunState] = {}
         self._hitl_futures: dict[str, asyncio.Future] = {}
+        self._llm: Any = None
 
     def create_from_canvas(self, canvas_data: dict[str, Any]) -> Workflow:
         """从画布数据创建工作流"""
@@ -297,6 +298,11 @@ class WorkflowEngine:
                 name=node.label, role=AgentRole.SPECIALIST, mode=AgentMode.SINGLE,
                 model=model, tools=node.config.get("tools", []),
             ))
+
+        agent.llm = self._llm
+        agent.memory = self.memory
+        agent.skill_registry = self.skill_registry
+        agent.tool_registry = self.tool_registry
 
         return await agent.execute(input_data)
 

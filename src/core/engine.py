@@ -31,6 +31,7 @@ class FusionEngine:
     _memory: Any = None           # UnifiedMemory
     _evolution: Any = None        # EvolutionEngine
     _tool_registry: Any = None    # ToolRegistry
+    _llm: Any = None              # LLMAdapter
 
     async def initialize(self) -> None:
         """初始化所有子系统"""
@@ -38,6 +39,14 @@ class FusionEngine:
             EventType.WORKFLOW_STARTED,
             {"action": "engine_init"},
             source="fusion_engine",
+        )
+
+        # 初始化LLM适配器
+        from src.llm.adapter import create_llm_adapter
+        self._llm = create_llm_adapter(
+            provider=self.config.model.provider,
+            api_key=self.config.model.api_key,
+            api_base=self.config.model.api_base,
         )
 
         # 初始化记忆系统（融合Hermes MemoryProvider + JiuwenSwarm MemoryIndexManager）
@@ -61,6 +70,7 @@ class FusionEngine:
             tool_registry=self._tool_registry,
             memory=self._memory,
         )
+        self._workflow_engine._llm = self._llm
 
         # 初始化自进化引擎（融合Hermes Curator + JiuwenSwarm Skill自演进）
         if self.config.hermes.self_evolution or self.config.jiwen.swarmflow:

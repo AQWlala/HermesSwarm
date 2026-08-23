@@ -44,7 +44,14 @@ _engine: FusionEngine | None = None
 async def get_engine() -> FusionEngine:
     global _engine
     if _engine is None:
+        import os
         config = FusionConfig()
+        api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+        if api_key:
+            config.model.provider = "openai"
+            config.model.api_key = api_key
+            config.model.api_base = os.environ.get("LLM_API_BASE", "https://api.deepseek.com/v1")
+            config.model.model_name = os.environ.get("LLM_MODEL", "deepseek-chat")
         _engine = FusionEngine(config=config)
         await _engine.initialize()
     return _engine

@@ -103,6 +103,7 @@ class BaseAgent(ABC):
         self.skill_registry: Any = None
         self.tool_registry: Any = None
         self.event_bus: Any = None
+        self.llm: Any = None
 
     @abstractmethod
     async def process(self, input: Any) -> Any:
@@ -125,6 +126,22 @@ class BaseAgent(ABC):
             await self._store_memory(input, result)
 
         return result
+
+    async def llm_chat(self, prompt: str, system: str = "") -> str:
+        """调用LLM生成回复（统一入口）"""
+        if not self.llm:
+            from src.llm.adapter import DemoAdapter
+            self.llm = DemoAdapter()
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        return await self.llm.chat(
+            messages,
+            model=self.config.model,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
 
     # === Hermes基因: 自进化方法 ===
 

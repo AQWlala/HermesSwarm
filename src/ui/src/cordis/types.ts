@@ -114,6 +114,7 @@ declare module "@deepseek-ai/cordis" {
     "tool/registered"(name: string, schema: ToolSchema): void;
     "llm/request"(messages: LLMMessage[]): void;
     "llm/response"(response: LLMResponse): void;
+    "hitl:request"(data: { run_id: string; node_id: string; prompt: string }): void;
   }
 }
 
