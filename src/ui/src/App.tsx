@@ -4,14 +4,18 @@ import WorkflowTemplates, { type TemplateData } from "./components/canvas/Workfl
 import SkillsPanel from "./components/panels/SkillsPanel";
 import MemoryPanel from "./components/panels/MemoryPanel";
 import CuratorPanel from "./components/panels/CuratorPanel";
+import LearningGraphPanel from "./components/panels/LearningGraphPanel";
+import SkillDevPanel from "./components/panels/SkillDevPanel";
 
-type TabId = "canvas" | "skills" | "memory" | "curator";
+type TabId = "canvas" | "skills" | "memory" | "curator" | "graph" | "skilldev";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "canvas", label: "工作流画布", icon: "🎨" },
   { id: "skills", label: "技能管理", icon: "⚡" },
   { id: "memory", label: "记忆系统", icon: "🧠" },
   { id: "curator", label: "Curator", icon: "🔄" },
+  { id: "graph", label: "Learning Graph", icon: "📊" },
+  { id: "skilldev", label: "SkillDev", icon: "🔧" },
 ];
 
 const App: React.FC = () => {
@@ -118,7 +122,7 @@ const App: React.FC = () => {
           </div>
         )}
         <div style={{ marginTop: "auto", fontSize: 11, color: "#666" }}>
-          v0.6.0 · DeepSeek LLM
+          v0.7.0 · DeepSeek LLM
         </div>
       </div>
       <div className="main-content">
@@ -151,6 +155,8 @@ const App: React.FC = () => {
         {tab === "skills" && <SkillsPanel />}
         {tab === "memory" && <MemoryPanel />}
         {tab === "curator" && <CuratorPanel />}
+        {tab === "graph" && <LearningGraphPanel />}
+        {tab === "skilldev" && <SkillDevPanel />}
       </div>
     </div>
   );

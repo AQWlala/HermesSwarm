@@ -78,6 +78,50 @@ class LearningGraph:
         if node and memory_id not in node.memory_links:
             node.memory_links.append(memory_id)
 
+    def derive_lexical_edges(self, memories: dict[str, str]) -> int:
+        """从记忆内容派生memory-skill词法边（Hermes基因）
+
+        通过词汇重叠检测哪些记忆与哪些技能相关:
+        - 提取技能description/tags的关键词
+        - 提取记忆内容的关键词
+        - 词汇重叠>阈值时建立边
+
+        Args:
+            memories: {memory_id: content}
+
+        Returns:
+            新建的边数
+        """
+        import re
+        new_edges = 0
+        for skill_id, node in self.nodes.items():
+            skill = None
+            for s in [self.nodes.get(sid) for sid in [skill_id]]:
+                if s:
+                    skill = s
+                    break
+            if not node.related and not node.memory_links:
+                pass
+
+            skill_keywords = set()
+            if hasattr(self, '_skill_texts'):
+                skill_keywords = self._skill_texts.get(skill_id, set())
+
+            for mem_id, content in memories.items():
+                if mem_id in node.memory_links:
+                    continue
+                content_words = set(re.findall(r'\w{3,}', content.lower()))
+                if skill_keywords and content_words:
+                    overlap = len(skill_keywords & content_words)
+                    if overlap >= 2:
+                        self.link_memory(skill_id, mem_id)
+                        new_edges += 1
+        return new_edges
+
+    def set_skill_texts(self, skill_texts: dict[str, set[str]]) -> None:
+        """设置技能关键词（供词法边派生）"""
+        self._skill_texts = skill_texts
+
     def get_related(self, skill_id: str, depth: int = 1) -> list[str]:
         """获取相关技能（BFS遍历）"""
         if skill_id not in self.nodes:

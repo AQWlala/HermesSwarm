@@ -6,10 +6,11 @@ Tauri生产模式用IPC，开发模式用HTTP降级
 from __future__ import annotations
 
 import json
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -50,6 +51,45 @@ class MemoryStoreRequest(BaseModel):
 class MemorySearchRequest(BaseModel):
     query: str = ""
     limit: int = 10
+
+
+class SkillDevStartRequest(BaseModel):
+    skill_name: str
+    skill_description: str
+
+
+class SkillDevResumeRequest(BaseModel):
+    pipeline_id: str
+
+
+class SkillDevPauseRequest(BaseModel):
+    pipeline_id: str
+
+
+class OneshotRequest(BaseModel):
+    prompt: str
+    template: str = ""
+    system: str = ""
+
+
+class MCPConnectRequest(BaseModel):
+    name: str
+    command: str = ""
+    args: list[str] = []
+    transport: str = "stdio"
+
+
+class MCPCallToolRequest(BaseModel):
+    tool_name: str
+    arguments: dict[str, Any] = {}
+
+
+class SymphonyRecordRequest(BaseModel):
+    plan_id: str
+    outcome: str
+    selected_edges: list[str] = []
+    failed_edges: list[str] = []
+    failure_attribution: str = ""
 
 
 _engine: FusionEngine | None = None
@@ -206,6 +246,217 @@ def create_app() -> FastAPI:
     @app.get("/api/teams")
     async def list_teams():
         return {"teams": []}
+
+    # v0.7.0: WebSocket流式事件
+    @app.websocket("/ws/events")
+    async def ws_events(ws: WebSocket):
+        engine = await get_engine()
+        if not engine._websocket:
+            await ws.close()
+            return
+        await engine._websocket.connect(ws)
+        try:
+            while True:
+                data = await ws.receive_text()
+                try:
+                    msg = json.loads(data)
+                    if msg.get("type") == "ping":
+                        await ws.send_json({"type": "pong"})
+                except Exception:
+                    pass
+        except WebSocketDisconnect:
+            engine._websocket.disconnect(ws)
+
+    @app.get("/api/websocket/status")
+    async def ws_status():
+        engine = await get_engine()
+        if engine._websocket:
+            return engine._websocket.get_status()
+        return {"connections": 0}
+
+    # v0.7.0: Learning Graph可视化
+    @app.get("/api/curator/learning_graph")
+    async def learning_graph():
+        engine = await get_engine()
+        if not engine._evolution or not engine._evolution.curator:
+            return {"nodes": [], "edges": [], "stats": {}}
+        lg = engine._evolution.curator.learning_graph
+        nodes = []
+        for skill_id, node in lg.nodes.items():
+            skill = engine._skill_registry.skills.get(skill_id) if engine._skill_registry else None
+            nodes.append({
+                "id": skill_id,
+                "label": skill.name if skill else skill_id,
+                "use_count": node.use_count,
+                "success_rate": node.success_rate,
+                "related": node.related,
+                "memory_links": node.memory_links,
+                "state": skill.usage.state.value if skill else "unknown",
+            })
+        edges = []
+        for node_data in nodes:
+            for rel in node_data["related"]:
+                edges.append({"source": node_data["id"], "target": rel, "weight": 1.0, "type": "related"})
+            for mem in node_data["memory_links"]:
+                edges.append({"source": node_data["id"], "target": mem, "weight": 0.8, "type": "memory"})
+        stats = lg.get_stats()
+        state_counts = {}
+        for n in nodes:
+            state_counts[n["state"]] = state_counts.get(n["state"], 0) + 1
+        stats["active_nodes"] = state_counts.get("active", 0)
+        stats["stale_nodes"] = state_counts.get("stale", 0)
+        stats["archived_nodes"] = state_counts.get("archived", 0)
+        return {"nodes": nodes, "edges": edges, "stats": stats}
+
+    # v0.7.0: SkillDev流水线端点
+    @app.get("/api/skilldev/pipelines")
+    async def skilldev_list():
+        engine = await get_engine()
+        if engine._skilldev:
+            return {"pipelines": engine._skilldev.list_pipelines()}
+        return {"pipelines": []}
+
+    @app.get("/api/skilldev/state")
+    async def skilldev_state(id: str):
+        engine = await get_engine()
+        if engine._skilldev:
+            state = engine._skilldev.get_state(id)
+            if state:
+                return state.to_dict()
+        return {"error": "pipeline not found"}
+
+    @app.post("/api/skilldev/start")
+    async def skilldev_start(req: SkillDevStartRequest):
+        engine = await get_engine()
+        if engine._skilldev:
+            state = await engine._skilldev.start(req.skill_name, req.skill_description)
+            return {"pipeline_id": state.pipeline_id, "stage": state.stage.value, "suspended": state.suspended}
+        return {"error": "skilldev not initialized"}
+
+    @app.post("/api/skilldev/resume")
+    async def skilldev_resume(req: SkillDevResumeRequest):
+        engine = await get_engine()
+        if engine._skilldev:
+            state = await engine._skilldev.resume(req.pipeline_id)
+            if state:
+                return {"pipeline_id": state.pipeline_id, "stage": state.stage.value, "suspended": state.suspended}
+        return {"error": "pipeline not found"}
+
+    @app.post("/api/skilldev/pause")
+    async def skilldev_pause(req: SkillDevPauseRequest):
+        engine = await get_engine()
+        if engine._skilldev:
+            success = await engine._skilldev.pause(req.pipeline_id)
+            return {"success": success}
+        return {"success": False}
+
+    # v0.7.0: Oneshot无状态LLM调用
+    @app.post("/api/oneshot")
+    async def oneshot(req: OneshotRequest):
+        engine = await get_engine()
+        from src.llm.oneshot import OneshotCaller
+        caller = OneshotCaller(llm=engine._llm)
+        prompt = req.prompt
+        if req.template:
+            prompt = f"{req.template}: {req.prompt}"
+        result = await caller.call(prompt, system=req.system)
+        return {"result": result}
+
+    # v0.7.0: MCP客户端端点
+    @app.get("/api/mcp/status")
+    async def mcp_status():
+        engine = await get_engine()
+        if engine._mcp_client:
+            return engine._mcp_client.get_status()
+        return {"servers": [], "connected": [], "tools": 0}
+
+    @app.get("/api/mcp/tools")
+    async def mcp_tools():
+        engine = await get_engine()
+        if engine._mcp_client:
+            return {"tools": engine._mcp_client.get_tools()}
+        return {"tools": []}
+
+    @app.post("/api/mcp/connect")
+    async def mcp_connect(req: MCPConnectRequest):
+        engine = await get_engine()
+        if engine._mcp_client:
+            from src.tools.mcp_client import MCPServerConfig
+            config = MCPServerConfig(name=req.name, command=req.command, args=req.args, transport=req.transport)
+            engine._mcp_client.register_server(config)
+            success = await engine._mcp_client.connect(req.name)
+            return {"success": success, "tools": engine._mcp_client.get_tools()}
+        return {"success": False}
+
+    @app.post("/api/mcp/call")
+    async def mcp_call(req: MCPCallToolRequest):
+        engine = await get_engine()
+        if engine._mcp_client:
+            result = await engine._mcp_client.call_tool(req.tool_name, req.arguments)
+            return {"result": result}
+        return {"error": "mcp not initialized"}
+
+    # v0.7.0: Symphony图演进端点
+    @app.get("/api/symphony/stats")
+    async def symphony_stats():
+        engine = await get_engine()
+        if engine._symphony:
+            return engine._symphony.get_graph_stats()
+        return {}
+
+    @app.get("/api/symphony/weights")
+    async def symphony_weights():
+        engine = await get_engine()
+        if engine._symphony:
+            return {"weights": engine._symphony.get_effective_weights()}
+        return {"weights": {}}
+
+    @app.post("/api/symphony/record")
+    async def symphony_record(req: SymphonyRecordRequest):
+        engine = await get_engine()
+        if engine._symphony:
+            from src.agents.symphony_evolution import PlanOutcome
+            outcome = PlanOutcome(
+                plan_id=req.plan_id,
+                outcome=req.outcome,
+                selected_edges=req.selected_edges,
+                failed_edges=req.failed_edges,
+                failure_attribution=req.failure_attribution,
+            )
+            engine._symphony.record_plan_outcome(outcome)
+            return {"success": True}
+        return {"success": False}
+
+    # v0.7.0: 项目规范端点
+    @app.get("/api/project/spec")
+    async def project_spec():
+        engine = await get_engine()
+        if engine._project_context:
+            spec = engine._project_context.discover_spec()
+            if spec:
+                return {"path": str(spec[1]), "content": spec[0][:5000]}
+            return {"path": None, "content": None}
+        return {"path": None, "content": None}
+
+    # v0.7.0: Warm Pool端点
+    @app.get("/api/warm_pool/status")
+    async def warm_pool_status():
+        engine = await get_engine()
+        if engine._warm_pool:
+            return {
+                "max_size": engine._warm_pool.max_size,
+                "current_size": len(engine._warm_pool._slots),
+                "prewarm_enabled": engine._warm_pool.prewarm_enabled,
+            }
+        return {}
+
+    # v0.7.0: 凭证池端点
+    @app.get("/api/credentials/status")
+    async def credentials_status():
+        from src.llm.credential_pool import CredentialPool
+        pool = CredentialPool()
+        pool.load_from_env()
+        return pool.get_status()
 
     return app
 

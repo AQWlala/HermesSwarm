@@ -32,6 +32,13 @@ class FusionEngine:
     _evolution: Any = None        # EvolutionEngine
     _tool_registry: Any = None    # ToolRegistry
     _llm: Any = None              # LLMAdapter
+    # v0.7.0新增子系统
+    _project_context: Any = None  # ProjectContext
+    _warm_pool: Any = None        # AgentWarmPool
+    _symphony: Any = None         # SymphonyEvolution
+    _mcp_client: Any = None       # MCPClient
+    _skilldev: Any = None         # SkillDevPipeline
+    _websocket: Any = None        # WebSocketManager
 
     async def initialize(self) -> None:
         """初始化所有子系统"""
@@ -94,6 +101,40 @@ class FusionEngine:
                 event_bus=self.event_bus,
             )
 
+        # v0.7.0: 初始化项目规范上下文（Codex基因: AGENTS.md自动发现）
+        from src.core.project_context import ProjectContext
+        self._project_context = ProjectContext()
+        spec = self._project_context.discover_spec()
+        if spec:
+            await self.event_bus.publish_simple(
+                EventType.WORKFLOW_STARTED,
+                {"action": "project_spec_loaded", "path": str(spec[1])},
+                source="project_context",
+            )
+
+        # v0.7.0: 初始化Agent Warm Pool（JiuwenSwarm基因: 消除冷启动）
+        from src.core.warm_pool import AgentWarmPool
+        self._warm_pool = AgentWarmPool(max_size=3, prewarm_enabled=False)
+
+        # v0.7.0: 初始化Symphony图演进（JiuwenSwarm基因: plan_outcome反推边权重）
+        from src.agents.symphony_evolution import SymphonyEvolution
+        self._symphony = SymphonyEvolution()
+
+        # v0.7.0: 初始化MCP客户端（Hermes/Codex基因: 外部工具协议）
+        from src.tools.mcp_client import MCPClient
+        self._mcp_client = MCPClient()
+
+        # v0.7.0: 初始化SkillDev流水线（JiuwenSwarm基因: 确定性技能开发）
+        from src.skills.skilldev import SkillDevPipeline
+        self._skilldev = SkillDevPipeline(
+            llm_adapter=self._llm,
+            skill_registry=self._skill_registry,
+        )
+
+        # v0.7.0: 初始化WebSocket管理器（流式事件广播）
+        from src.core.websocket import WebSocketManager
+        self._websocket = WebSocketManager()
+
     async def execute_workflow(self, workflow_data: dict[str, Any], input_data: Any = None) -> dict[str, Any]:
         """执行工作流（统一入口）
 
@@ -147,6 +188,12 @@ class FusionEngine:
 
     async def shutdown(self) -> None:
         """关闭所有子系统"""
+        # v0.7.0: 关闭MCP服务器
+        if self._mcp_client:
+            self._mcp_client.disconnect_all()
+        # v0.7.0: 关闭WebSocket
+        if self._websocket:
+            await self._websocket.close()
         if self._memory:
             self._memory.close()
         await self.event_bus.publish_simple(
@@ -164,6 +211,13 @@ class FusionEngine:
             "evolution_enabled": self._evolution is not None,
             "hermes_genes": self.config.hermes.__dict__,
             "jiuwen_genes": self.config.jiwen.__dict__,
+            # v0.7.0新增状态
+            "project_spec": str(self._project_context._cached_path) if self._project_context and self._project_context._cached_path else None,
+            "warm_pool_size": len(self._warm_pool._slots) if self._warm_pool else 0,
+            "symphony_enabled": self._symphony is not None,
+            "mcp_connected": len(self._mcp_client._servers) if self._mcp_client else 0,
+            "skilldev_enabled": self._skilldev is not None,
+            "websocket_enabled": self._websocket is not None,
         }
 
     def submit_hitl_reply(self, run_id: str, node_id: str, answer: str) -> bool:
