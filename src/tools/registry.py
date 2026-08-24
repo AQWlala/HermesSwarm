@@ -182,6 +182,34 @@ class ToolRegistry:
             handler=self._tool_python_exec,
             severity="HIGH",
         )
+        self.register(
+            name="edit_file",
+            toolset="file",
+            schema={"description": "编辑文件（精确字符串替换）", "parameters": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}}},
+            handler=self._tool_edit_file,
+            severity="MEDIUM",
+        )
+        self.register(
+            name="grep",
+            toolset="search",
+            schema={"description": "搜索文件内容（正则）", "parameters": {"pattern": {"type": "string"}, "path": {"type": "string"}, "include": {"type": "string"}}},
+            handler=self._tool_grep,
+            severity="LOW",
+        )
+        self.register(
+            name="glob",
+            toolset="search",
+            schema={"description": "按glob模式查找文件", "parameters": {"pattern": {"type": "string"}, "path": {"type": "string"}}},
+            handler=self._tool_glob,
+            severity="LOW",
+        )
+        self.register(
+            name="pytest_run",
+            toolset="test",
+            schema={"description": "运行pytest测试", "parameters": {"path": {"type": "string"}, "verbose": {"type": "boolean"}}},
+            handler=self._tool_pytest,
+            severity="MEDIUM",
+        )
 
     async def _tool_read_file(self, path: str, **kwargs) -> str:
         try:
@@ -276,6 +304,78 @@ class ToolRegistry:
             with contextlib.redirect_stdout(buf):
                 exec(code, {"__builtins__": safe_builtins})
             return buf.getvalue().strip() or "(no output)"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_edit_file(self, path: str, old: str, new: str, **kwargs) -> str:
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            if old not in content:
+                return f"Error: old string not found in {path}"
+            if content.count(old) > 1:
+                return f"Error: old string found {content.count(old)} times, need unique match"
+            new_content = content.replace(old, new, 1)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            return f"OK: replaced 1 occurrence in {path}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_grep(self, pattern: str, path: str = ".", include: str = "", **kwargs) -> str:
+        try:
+            import re
+            from pathlib import Path
+            regex = re.compile(pattern)
+            root = Path(path)
+            results = []
+            for file_path in root.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                if any(p in str(file_path) for p in ("__pycache__", ".git", "node_modules", ".venv")):
+                    continue
+                if include and not file_path.match(include):
+                    continue
+                try:
+                    text = file_path.read_text(encoding="utf-8", errors="ignore")
+                    for i, line in enumerate(text.splitlines(), 1):
+                        if regex.search(line):
+                            results.append(f"{file_path}:{i}: {line.strip()[:200]}")
+                            if len(results) >= 50:
+                                return "\n".join(results) + f"\n... (truncated, {len(results)} matches)"
+                except Exception:
+                    continue
+            return "\n".join(results) if results else "(no matches)"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_glob(self, pattern: str, path: str = ".", **kwargs) -> str:
+        try:
+            from pathlib import Path
+            root = Path(path)
+            matches = sorted(root.glob(pattern))
+            if not matches:
+                return "(no matches)"
+            return "\n".join(str(m.relative_to(root)) for m in matches[:100])
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _tool_pytest(self, path: str = ".", verbose: bool = True, **kwargs) -> str:
+        try:
+            import subprocess
+            import shlex
+            cmd = ["python", "-m", "pytest", path]
+            if verbose:
+                cmd.append("-v")
+            cmd.extend(["--tb=short", "-x"])
+            result = subprocess.run(
+                cmd, shell=False, capture_output=True, text=True, timeout=60,
+                stdin=subprocess.DEVNULL,
+            )
+            output = result.stdout
+            if result.stderr:
+                output += f"\n[stderr]: {result.stderr}"
+            return output.strip() or "(no output)"
         except Exception as e:
             return f"Error: {e}"
 
