@@ -105,6 +105,11 @@ class BaseAgent(ABC):
         self.event_bus: Any = None
         self.llm: Any = None
 
+        # 提示缓存不变性（Hermes基因: per-conversation prompt caching is sacred）
+        # system prompt在会话期间byte-stable，不随技能加载/工具变更而改变
+        self._cached_system_prompt: str | None = None
+        self._prompt_cache_version: int = 0
+
     @abstractmethod
     async def process(self, input: Any) -> Any:
         """处理输入（抽象方法，由子类实现）"""
@@ -128,13 +133,21 @@ class BaseAgent(ABC):
         return result
 
     async def llm_chat(self, prompt: str, system: str = "") -> str:
-        """调用LLM生成回复（统一入口）"""
+        """调用LLM生成回复（统一入口）
+
+        提示缓存不变性（Hermes基因）:
+        - system prompt在会话期间byte-stable
+        - 首次调用时构建并缓存，后续调用复用
+        - 技能/工具变更不破坏已有缓存
+        """
         if not self.llm:
             from src.llm.adapter import DemoAdapter
             self.llm = DemoAdapter()
+
+        cached_system = self._get_or_build_system_prompt(system)
         messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
+        if cached_system:
+            messages.append({"role": "system", "content": cached_system})
         messages.append({"role": "user", "content": prompt})
         return await self.llm.chat(
             messages,
@@ -142,6 +155,30 @@ class BaseAgent(ABC):
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
         )
+
+    def _get_or_build_system_prompt(self, explicit: str = "") -> str:
+        """获取或构建system prompt（提示缓存不变性）
+
+        优先级: 显式参数 > 缓存 > 构建
+        一旦构建，后续调用复用缓存，不重建
+        """
+        if explicit:
+            return explicit
+        if self._cached_system_prompt is not None:
+            return self._cached_system_prompt
+
+        parts = [f"你是{self.config.name}，一个专业AI智能体。"]
+        if self.skill_registry:
+            skill_section = self.skill_registry.build_system_prompt_section()
+            if skill_section:
+                parts.append(skill_section)
+        self._cached_system_prompt = "\n\n".join(parts)
+        self._prompt_cache_version += 1
+        return self._cached_system_prompt
+
+    def invalidate_prompt_cache(self) -> None:
+        """显式失效提示缓存（仅在技能/工具集变更时调用）"""
+        self._cached_system_prompt = None
 
     # === Hermes基因: 自进化方法 ===
 

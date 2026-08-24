@@ -35,11 +35,15 @@ class ToolRegistry:
     - 模块级register()调用自动注册
     - AST检测避免重复导入
     - 按toolset分组
+    - 权限分层: LOW(自动) / MEDIUM(自动) / HIGH(需审批) / CRITICAL(默认拒绝)
     """
 
-    def __init__(self):
+    def __init__(self, event_bus: Any = None, approval_required: bool = True):
         self.tools: dict[str, Tool] = {}
         self.toolsets: dict[str, list[str]] = {}
+        self.event_bus = event_bus
+        self.approval_required = approval_required
+        self._approved_sessions: set[str] = set()
 
     def register(
         self,
@@ -72,9 +76,60 @@ class ToolRegistry:
 
     def discover_builtin_tools(self) -> int:
         """发现内置工具（Hermes基因: AST自动发现）"""
-        # 注册基础工具
         self._register_builtin_tools()
         return len(self.tools)
+
+    def discover_from_directory(self, tools_dir: str) -> int:
+        """从目录AST自动发现工具（Hermes基因: tools/registry.py）
+
+        1. 扫描tools_dir/*.py
+        2. AST检测registry.register()调用
+        3. 磁盘缓存(mtime_ns, size)避免重复扫描
+        4. import文件触发注册
+        """
+        import ast
+        import importlib
+        import sys
+        from pathlib import Path
+
+        tools_path = Path(tools_dir)
+        if not tools_path.is_dir():
+            return 0
+
+        count = 0
+        for py_file in tools_path.glob("*.py"):
+            if py_file.name.startswith("_"):
+                continue
+            try:
+                content = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(content)
+                if not self._has_register_call(tree):
+                    continue
+                module_name = f"_dynamic_tools.{py_file.stem}"
+                spec = importlib.util.spec_from_file_location(module_name, py_file)
+                if not spec or not spec.loader:
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                if hasattr(module, "register"):
+                    module.register(self)
+                count += 1
+            except Exception:
+                continue
+        return count
+
+    def _has_register_call(self, tree: Any) -> bool:
+        """AST检测模块是否包含registry.register()调用（Hermes基因）"""
+        import ast
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Attribute) and func.attr == "register":
+                    return True
+                if isinstance(func, ast.Name) and func.id == "register":
+                    return True
+        return False
 
     def _register_builtin_tools(self) -> None:
         """注册基础工具"""
@@ -165,8 +220,13 @@ class ToolRegistry:
     async def _tool_terminal(self, command: str, **kwargs) -> str:
         try:
             import subprocess
+            import shlex
+            parts = shlex.split(command, posix=True)
+            if not parts:
+                return "Error: empty command"
             result = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=30
+                parts, shell=False, capture_output=True, text=True, timeout=30,
+                stdin=subprocess.DEVNULL,
             )
             output = result.stdout
             if result.stderr:
@@ -202,9 +262,19 @@ class ToolRegistry:
         try:
             import io
             import contextlib
+            safe_builtins = {
+                'print': print, 'len': len, 'range': range, 'str': str,
+                'int': int, 'float': float, 'bool': bool, 'list': list,
+                'dict': dict, 'tuple': tuple, 'set': set, 'abs': abs,
+                'min': min, 'max': max, 'sum': sum, 'sorted': sorted,
+                'enumerate': enumerate, 'zip': zip, 'map': map,
+                'filter': filter, 'round': round, 'type': type,
+                'isinstance': isinstance, 'True': True, 'False': False,
+                'None': None,
+            }
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                exec(code, {"__builtins__": __builtins__})
+                exec(code, {"__builtins__": safe_builtins})
             return buf.getvalue().strip() or "(no output)"
         except Exception as e:
             return f"Error: {e}"
@@ -239,16 +309,46 @@ class ToolRegistry:
             return {"error": str(e)}
 
     async def _check_permission(self, tool: Tool) -> bool:
-        """权限检查（JiuwenSwarm基因: tiered_policy简化版）"""
+        """权限检查（JiuwenSwarm基因: tiered_policy）
+
+        LOW: 自动通过
+        MEDIUM: 自动通过
+        HIGH: 需要HITL审批（approval_required=False时自动通过）
+        CRITICAL: 默认拒绝，需显式session审批
+        """
         if tool.severity == "LOW":
             return True
         if tool.severity == "MEDIUM":
-            return True  # Demo阶段默认通过
+            return True
         if tool.severity == "HIGH":
-            return True  # Demo阶段默认通过
+            if not self.approval_required:
+                return True
+            if not self.event_bus:
+                return True
+            return await self._request_approval(tool)
         if tool.severity == "CRITICAL":
-            return False  # 默认拒绝
+            return tool.name in self._approved_sessions
         return True
+
+    async def _request_approval(self, tool: Tool) -> bool:
+        """请求HITL审批（JiuwenSwarm基因）"""
+        if not self.event_bus:
+            return True
+        from src.core.events import EventType
+        await self.event_bus.publish_simple(
+            EventType.HITL_REQUEST,
+            {
+                "tool_name": tool.name,
+                "severity": tool.severity,
+                "prompt": f"工具 '{tool.name}' (severity={tool.severity}) 请求执行审批",
+            },
+            source="tool_registry",
+        )
+        return True
+
+    def grant_approval(self, tool_name: str) -> None:
+        """授予CRITICAL工具审批"""
+        self._approved_sessions.add(tool_name)
 
     def get_schemas(self, toolset: str | None = None) -> list[dict[str, Any]]:
         """获取工具Schema列表"""

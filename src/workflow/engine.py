@@ -191,6 +191,7 @@ class WorkflowEngine:
 
         outputs: dict[str, Any] = {}
         node_map = {n.id: n for n in workflow.nodes}
+        skipped_nodes: set[str] = set()
 
         for layer_idx, layer in enumerate(topo.layers):
             await self._emit(
@@ -200,7 +201,14 @@ class WorkflowEngine:
 
             tasks = []
             for node_id in layer:
+                if node_id in skipped_nodes:
+                    continue
                 node = node_map[node_id]
+
+                if self._should_skip_node(workflow, node_id, outputs, skipped_nodes):
+                    skipped_nodes.add(node_id)
+                    continue
+
                 parent_output = self._collect_parent_output(workflow, node_id, outputs)
                 task = self._execute_node_safe(
                     node, parent_output if parent_output is not None else input_data,
@@ -214,6 +222,12 @@ class WorkflowEngine:
                     outputs[node_id] = {"error": str(result)}
                 else:
                     outputs[node_id] = result
+                    if node_map[node_id].type == NodeType.CONDITION:
+                        cond_result = result.get("result", True) if isinstance(result, dict) else True
+                        if not cond_result:
+                            for edge in workflow.edges:
+                                if edge.source == node_id:
+                                    skipped_nodes.add(edge.target)
 
         await self._emit(WorkflowEventKind.WORKFLOW_COMPLETED, run_state)
 
@@ -234,6 +248,18 @@ class WorkflowEngine:
         if len(parents) == 1:
             return outputs.get(parents[0])
         return {parent: outputs.get(parent) for parent in parents}
+
+    def _should_skip_node(
+        self, workflow: Workflow, node_id: str, outputs: dict[str, Any], skipped: set[str]
+    ) -> bool:
+        """检查节点是否应被跳过（条件路由）
+
+        如果任一前驱条件节点结果为False且指向本节点，则跳过。
+        """
+        for edge in workflow.edges:
+            if edge.target == node_id and edge.source in skipped:
+                return True
+        return False
 
     async def _execute_node_safe(
         self, node: WorkflowNode, input_data: Any, run_state: WorkflowRunState
@@ -316,10 +342,11 @@ class WorkflowEngine:
         return {"tool": tool_name, "input": str(input_data)[:200]}
 
     async def _execute_condition(self, node: WorkflowNode, input_data: Any) -> Any:
-        """执行条件节点"""
+        """执行条件节点（安全表达式解析，无eval逃逸风险）"""
+        from src.core.safe_eval import safe_eval
         expr = node.config.get("expression", "True")
         try:
-            result = eval(expr, {"__builtins__": {}}, {"data": input_data, "input": input_data})
+            result = safe_eval(expr, {"data": input_data, "input": input_data})
             return {"condition": expr, "result": bool(result)}
         except Exception:
             return {"condition": expr, "result": True}

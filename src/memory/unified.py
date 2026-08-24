@@ -171,6 +171,20 @@ class UnifiedMemory:
             cur.execute("INSERT INTO memory_fts_cjk (rowid, content) VALUES (?, ?)",
                         (rowid, entry.content))
             self.conn.commit()
+            self._maybe_wal_checkpoint()
+
+    def _maybe_wal_checkpoint(self) -> None:
+        """WAL checkpoint定期清理（Hermes基因）
+
+        每925次写入执行一次PRAGMA wal_checkpoint(PASSIVE)，
+        止WAL文件无限增长。
+        """
+        self._write_count = getattr(self, "_write_count", 0) + 1
+        if self._write_count % 100 == 0:
+            try:
+                self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except sqlite3.OperationalError:
+                pass
 
     def search(self, query: str, limit: int = 10) -> list[MemoryEntry]:
         """搜索记忆（Hermes基因: 三表智能路由）

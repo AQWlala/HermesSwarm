@@ -55,7 +55,10 @@ class FusionEngine:
 
         # 初始化工具注册表（Hermes基因: AST自动发现）
         from src.tools.registry import ToolRegistry
-        self._tool_registry = ToolRegistry()
+        self._tool_registry = ToolRegistry(
+            event_bus=self.event_bus,
+            approval_required=self.config.tool_approval_required,
+        )
         self._tool_registry.discover_builtin_tools()
 
         # 初始化技能注册中心（融合Hermes SKILL.md + JiuwenSwarm 单库+可见性）

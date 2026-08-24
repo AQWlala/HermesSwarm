@@ -297,7 +297,7 @@ class TeamManager:
     async def _emit_event(self, team: TeamInstance, event_type: str, data: dict[str, Any]) -> None:
         """发射事件（JiuwenSwarm基因: 背压队列上限64）
 
-        队列满时await（慢速消费者背压），而非丢弃。
+        队列满时短时超时重检（0.1s），检测孤儿队列避免永久阻塞。
         """
         event = TeamEvent(
             type=event_type,
@@ -307,13 +307,25 @@ class TeamManager:
         try:
             team.event_queue.put_nowait(event)
         except asyncio.QueueFull:
-            await team.event_queue.put(event)
+            try:
+                await asyncio.wait_for(
+                    team.event_queue.put(event),
+                    timeout=_WAITER_PUT_RECHECK_TIMEOUT_SEC,
+                )
+            except asyncio.TimeoutError:
+                pass
 
         for queue in self._event_subscribers.get(team.team_id, []):
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                pass
+                try:
+                    await asyncio.wait_for(
+                        queue.put(event),
+                        timeout=_WAITER_PUT_RECHECK_TIMEOUT_SEC,
+                    )
+                except asyncio.TimeoutError:
+                    pass
 
     def subscribe_events(self, team_id: str) -> asyncio.Queue:
         """订阅团队事件"""

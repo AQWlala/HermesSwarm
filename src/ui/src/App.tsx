@@ -1,8 +1,21 @@
 import React, { useState } from "react";
 import FusionCanvas from "./components/canvas/FusionCanvas";
 import WorkflowTemplates, { type TemplateData } from "./components/canvas/WorkflowTemplates";
+import SkillsPanel from "./components/panels/SkillsPanel";
+import MemoryPanel from "./components/panels/MemoryPanel";
+import CuratorPanel from "./components/panels/CuratorPanel";
+
+type TabId = "canvas" | "skills" | "memory" | "curator";
+
+const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: "canvas", label: "工作流画布", icon: "🎨" },
+  { id: "skills", label: "技能管理", icon: "⚡" },
+  { id: "memory", label: "记忆系统", icon: "🧠" },
+  { id: "curator", label: "Curator", icon: "🔄" },
+];
 
 const App: React.FC = () => {
+  const [tab, setTab] = useState<TabId>("canvas");
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateData | null>(null);
   const [execResult, setExecResult] = useState<Record<string, unknown> | null>(null);
   const [, setExecStatus] = useState<string>("idle");
@@ -81,35 +94,63 @@ const App: React.FC = () => {
       <div className="sidebar">
         <h1>☤ HermesSwarm</h1>
         <div style={{ marginBottom: 16 }}>
-          <WorkflowTemplates onSelect={setSelectedTemplate} activeId={selectedTemplate?.id || null} />
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "10px 12px", marginBottom: 4,
+                border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13,
+                background: tab === t.id ? "#0066cc" : "transparent",
+                color: tab === t.id ? "#fff" : "#333",
+                fontWeight: tab === t.id ? 600 : 400,
+              }}
+            >
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
         </div>
+        {tab === "canvas" && (
+          <div style={{ marginBottom: 16 }}>
+            <WorkflowTemplates onSelect={setSelectedTemplate} activeId={selectedTemplate?.id || null} />
+          </div>
+        )}
         <div style={{ marginTop: "auto", fontSize: 11, color: "#666" }}>
-          v0.3.0 · DeepSeek LLM
+          v0.6.0 · DeepSeek LLM
         </div>
       </div>
       <div className="main-content">
-        <div className="toolbar">
-          <span style={{ fontSize: 14, fontWeight: "bold" }}>
-            {selectedTemplate ? `${selectedTemplate.icon} ${selectedTemplate.name}` : "🎨 可视化画布"}
-          </span>
-          <span style={{ fontSize: 12, color: "#666" }}>
-            {selectedTemplate ? selectedTemplate.description : "选择左侧模板或拖拽节点构建工作流"}
-          </span>
-        </div>
-        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-          <div className="canvas-container" style={{ flex: 1 }}>
-            <FusionCanvas template={selectedTemplate} onResult={setExecResult} onStatus={setExecStatus} />
-          </div>
-          {execResult && (
-            <div style={{ width: 400, borderLeft: "1px solid #ddd", background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #ddd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h3 style={{ margin: 0, fontSize: 15 }}>执行结果</h3>
-                <button onClick={() => setExecResult(null)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#999" }}>×</button>
-              </div>
-              {renderResult()}
+        {tab === "canvas" && (
+          <>
+            <div className="toolbar">
+              <span style={{ fontSize: 14, fontWeight: "bold" }}>
+                {selectedTemplate ? `${selectedTemplate.icon} ${selectedTemplate.name}` : "🎨 可视化画布"}
+              </span>
+              <span style={{ fontSize: 12, color: "#666" }}>
+                {selectedTemplate ? selectedTemplate.description : "选择左侧模板或拖拽节点构建工作流"}
+              </span>
             </div>
-          )}
-        </div>
+            <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+              <div className="canvas-container" style={{ flex: 1 }}>
+                <FusionCanvas template={selectedTemplate} onResult={setExecResult} onStatus={setExecStatus} />
+              </div>
+              {execResult && (
+                <div style={{ width: 400, borderLeft: "1px solid #ddd", background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                  <div style={{ padding: "12px 16px", borderBottom: "1px solid #ddd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <h3 style={{ margin: 0, fontSize: 15 }}>执行结果</h3>
+                    <button onClick={() => setExecResult(null)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#999" }}>×</button>
+                  </div>
+                  {renderResult()}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        {tab === "skills" && <SkillsPanel />}
+        {tab === "memory" && <MemoryPanel />}
+        {tab === "curator" && <CuratorPanel />}
       </div>
     </div>
   );
