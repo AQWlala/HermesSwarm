@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
+
 from typing import Any
 
 from src.agents.swarm.context import AgentSpec, SwarmBuildContext, TeamAgentSpec

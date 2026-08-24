@@ -73,10 +73,9 @@ npm run dev
 pip install -e ".[dev]"
 ```
 
-### Tauri桌面应用
+### 桌面应用打包
 ```bash
-cd src-tauri
-cargo tauri dev
+pyinstaller hermesswarm-desktop.spec --noconfirm
 ```
 
 ## 📁 项目结构
@@ -86,14 +85,14 @@ HermesSwarm/
 ├── src/
 │   ├── core/           # 融合引擎、配置、事件总线
 │   ├── agents/         # 智能体系统（Leader/Specialist/Evolution/Swarm）
-│   ├── skills/         # 技能注册中心（融合格式）
+│   ├── skills/         # 技能注册中心 + SkillDev流水线
 │   ├── memory/         # 统一记忆（FTS5+向量）
-│   ├── tools/          # 工具注册表（70+工具）
+│   ├── tools/          # 工具注册表 + MCP客户端
 │   ├── workflow/       # 工作流引擎（SwarmFlow+状态机）
 │   └── ui/             # React可视化画布前端
-├── src-tauri/          # Tauri桌面应用（Rust）
-├── docs/               # 架构文档
-└── upstream/           # 源项目参考（Hermes/JiuwenSwarm/Codex）
+├── skills/             # 预置SKILL.md技能
+├── desktop_main.py     # 单exe入口点
+└── hermesswarm-desktop.spec  # PyInstaller打包配置
 ```
 
 ## 🗺️ 开发路线图

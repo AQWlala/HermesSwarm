@@ -95,13 +95,6 @@ class LearningGraph:
         import re
         new_edges = 0
         for skill_id, node in self.nodes.items():
-            skill = None
-            for s in [self.nodes.get(sid) for sid in [skill_id]]:
-                if s:
-                    skill = s
-                    break
-            if not node.related and not node.memory_links:
-                pass
 
             skill_keywords = set()
             if hasattr(self, '_skill_texts'):
